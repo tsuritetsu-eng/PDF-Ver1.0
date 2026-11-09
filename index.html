@@ -102,9 +102,11 @@ for(let j=0;j<pair.length;j++){
 let p=pair[order==='normal'?j:pair.length-1-j],f=files.find(x=>x.id===p.fid);
 if(!f)continue;
 if(!sourceDocs.has(f.id))sourceDocs.set(f.id,await PDFDocument.load(f.bytes));
-let src=sourceDocs.get(f.id),original=src.getPage(p.index),box=original.getSize();
-let bounds=p.cropSide?{left:p.cropSide==='left'?0:box.width/2,bottom:0,right:p.cropSide==='left'?box.width/2:box.width,top:box.height}:undefined;
-let embedded=bounds?[await out.embedPages([original],[bounds])].flat()[0]:await out.embedPage(original);
+let src=sourceDocs.get(f.id),original=src.getPage(p.index),crop=original.getCropBox();
+let left=crop.x,bottom=crop.y,right=crop.x+crop.width,top=crop.y+crop.height;
+if(p.cropSide){let mid=left+crop.width/2;if(p.cropSide==='left')right=mid;else left=mid;}
+let bounds={left,bottom,right,top};
+let [embedded]=await out.embedPages([original],[bounds]);
 let z=Math.min(w/embedded.width,H/embedded.height);
 pg.drawPage(embedded,{x:j*w+(w-embedded.width*z)/2,y:(H-embedded.height*z)/2,width:embedded.width*z,height:embedded.height*z});
 }
