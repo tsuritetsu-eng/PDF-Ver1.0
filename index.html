@@ -91,7 +91,25 @@ async function pdfFor(list){let out=await PDFDocument.create(),sources=new Map()
 function save(bytes,name,type='application/pdf'){let u=URL.createObjectURL(new Blob([bytes],{type})),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1200)}
 function ranges(s,n){if(!s.trim())return Array.from({length:n},(_,i)=>[i]);return s.split(',').map(x=>{let m=x.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/);if(!m)throw Error('ページ範囲の形式を確認してください');let a=+m[1],b=+(m[2]||m[1]);if(a<1||b<a||b>n)throw Error('ページ範囲は1～'+n+'で指定してください');return Array.from({length:b-a+1},(_,i)=>a-1+i)})}
 async function exportPDF(){if(!pages.length)throw Error('先にPDFを追加してください');if(mode==='edit'){let list=pages.filter(p=>selected.has(p.id));if(!list.length)throw Error('ページを選択してください');save(await (await pdfFor(list)).save(),'編集済みPDF.pdf');return}if(mode==='merge'){save(await (await pdfFor(pages)).save(),$('outname').value||'結合PDF.pdf');return}if(mode==='split'){let t=$('splitType').value,groups=t==='each'?pages.map((p,i)=>[i]):t==='selected'?[pages.map((p,i)=>selected.has(p.id)?i:-1).filter(i=>i>=0)]:ranges($('ranges').value,pages.length);let zip=new JSZip();for(let i=0;i<groups.length;i++){if(!groups[i].length)continue;zip.file(($('prefix').value||'分割PDF')+'_'+String(i+1).padStart(2,'0')+'.pdf',await (await pdfFor(groups[i].map(ix=>pages[ix]))).save())}save(await zip.generateAsync({type:'uint8array'}),'分割PDF一式.zip','application/zip');return}
-let typ=$('spreadType').value,order=$('spreadOrder').value,paper=$('paper').value,out=await PDFDocument.create(),sizes={A4:[595.28,841.89],A5:[419.53,595.28]},[w,h]=sizes[paper];if(typ==='split'){for(let p of pages){let f=files.find(x=>x.id===p.fid),src=await PDFDocument.load(f.bytes),orig=src.getPage(p.index),box=orig.getSize(),mid=box.width/2,parts=order==='normal'?[[0,mid],[mid,box.width]]:[[mid,box.width],[0,mid]];for(let [l,r] of parts){let [emb]=await out.embedPages([orig],[{left:l,bottom:0,right:r,top:box.height}]);let pg=out.addPage([w,h]),z=Math.min(w/emb.width,h/emb.height);pg.drawPage(emb,{x:(w-emb.width*z)/2,y:(h-emb.height*z)/2,width:emb.width*z,height:emb.height*z})}}}else{let W=2*w,H=h;for(let i=0;i<pages.length;i+=2){let pair=pages.slice(i,i+2),pg=out.addPage([W,H]);for(let j=0;j<pair.length;j++){let p=pair[order==='normal'?j:pair.length-1-j],f=files.find(x=>x.id===p.fid),src=await PDFDocument.load(f.bytes),[emb]=await out.embedPages([src.getPage(p.index)]),z=Math.min(w/emb.width,H/emb.height);pg.drawPage(emb,{x:j*w+(w-emb.width*z)/2,y:(H-emb.height*z)/2,width:emb.width*z,height:emb.height*z})}}}save(await out.save(),typ==='split'?'見開き分割.pdf':'見開き結合.pdf')}
+let typ=$('spreadType').value,order=$('spreadOrder').value,paper=$('paper').value,out=await PDFDocument.create(),sizes={A4:[595.28,841.89],A5:[419.53,595.28]},[w,h]=sizes[paper];if(typ==='split'){for(let p of pages){let f=files.find(x=>x.id===p.fid),src=await PDFDocument.load(f.bytes),orig=src.getPage(p.index),box=orig.getSize(),mid=box.width/2,parts=order==='normal'?[[0,mid],[mid,box.width]]:[[mid,box.width],[0,mid]];for(let [l,r] of parts){let [emb]=await out.embedPages([orig],[{left:l,bottom:0,right:r,top:box.height}]);let pg=out.addPage([w,h]),z=Math.min(w/emb.width,h/emb.height);pg.drawPage(emb,{x:(w-emb.width*z)/2,y:(h-emb.height*z)/2,width:emb.width*z,height:emb.height*z})}}}else{
+let W=2*w,H=h;
+let joinPages=selected.size?pages.filter(p=>selected.has(p.id)):pages;
+if(!joinPages.length)throw Error('結合するページを選択してください');
+let sourceDocs=new Map();
+for(let i=0;i<joinPages.length;i+=2){
+let pair=joinPages.slice(i,i+2),pg=out.addPage([W,H]);
+for(let j=0;j<pair.length;j++){
+let p=pair[order==='normal'?j:pair.length-1-j],f=files.find(x=>x.id===p.fid);
+if(!f)continue;
+if(!sourceDocs.has(f.id))sourceDocs.set(f.id,await PDFDocument.load(f.bytes));
+let src=sourceDocs.get(f.id),original=src.getPage(p.index),box=original.getSize();
+let bounds=p.cropSide?{left:p.cropSide==='left'?0:box.width/2,bottom:0,right:p.cropSide==='left'?box.width/2:box.width,top:box.height}:undefined;
+let embedded=bounds?[await out.embedPages([original],[bounds])].flat()[0]:await out.embedPage(original);
+let z=Math.min(w/embedded.width,H/embedded.height);
+pg.drawPage(embedded,{x:j*w+(w-embedded.width*z)/2,y:(H-embedded.height*z)/2,width:embedded.width*z,height:embedded.height*z});
+}
+}
+}save(await out.save(),typ==='split'?'見開き分割.pdf':'見開き結合.pdf')}
 $('export').onclick=async()=>{let b=$('export');b.disabled=true;say('PDFを処理しています…');try{await exportPDF();say('書き出しが完了しました')}catch(e){say(e.message||'処理に失敗しました')}finally{b.disabled=false}};
 $('clear').onclick=()=>{if(files.length&&!confirm('読み込んだPDFをすべて閉じますか？'))return;files.forEach(f=>disposePdf(f.id));files=[];pages=[];selected.clear();renderFiles();renderPages();say('すべて閉じました')};
 })();
